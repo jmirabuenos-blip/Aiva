@@ -1,5 +1,7 @@
-import * as dotenv from "dotenv";
-dotenv.config();
+// --- Only load dotenv locally ---
+if (process.env.NODE_ENV !== "production") {
+  import("dotenv").then(dotenv => dotenv.config());
+}
 
 import express from "express"; 
 import type { Request, Response } from "express"; 
@@ -64,12 +66,12 @@ app.post("/api/generate", async (req: Request, res: Response) => {
   }
 });
 
-// --- ADD HEALTH CHECK ROUTE ---
+// --- Health check ---
 app.get("/healthz", (_req: Request, res: Response) => {
   res.status(200).send("ok");
 });
 
-// --- SERVER LISTEN ---
+// --- Server listen ---
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`✅ Aiva Command-Center Online on Port ${PORT}`);
