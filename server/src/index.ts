@@ -8,25 +8,22 @@ import Groq from "groq-sdk";
 
 const app = express();
 
-// --- UPDATED CORS: Open to everything for testing ---
+// --- CORS ---
 app.use(cors({
   origin: "*",
   methods: ["GET", "POST"],
   allowedHeaders: ["Content-Type"]
 }));
-
 app.use(express.json());
 
-// Initialize Groq - Check if API key exists
+// --- Groq initialization ---
 const apiKey = process.env.GROQ_API_KEY;
-if (!apiKey) {
-  console.error("❌ CRITICAL ERROR: GROQ_API_KEY is missing from environment variables!");
-}
+if (!apiKey) console.error("❌ CRITICAL ERROR: GROQ_API_KEY is missing!");
 const groq = new Groq({ apiKey });
 
+// --- AI generate route ---
 app.post("/api/generate", async (req: Request, res: Response) => {
   console.log(`📩 Received request for topic: ${req.body.topic}`);
-  
   try {
     const { topic } = req.body;
     if (!topic) return res.status(400).json({ error: "No topic provided" });
@@ -38,7 +35,6 @@ app.post("/api/generate", async (req: Request, res: Response) => {
     let taskInstruction = "";
     let temperature = 0.7;
 
-    // ... (Keep your existing if/else logic for systemRole and taskInstruction)
     if (input.includes("explain") || input.includes("what is") || input.includes("how does")) {
       systemRole = identity + "You are the Concept Mentor. Use the Feynman Technique.";
       taskInstruction = `Explain concisely: "${topic}". Rules: Use '## 🎓 Deep Dive' as ONLY header.`;
@@ -68,6 +64,12 @@ app.post("/api/generate", async (req: Request, res: Response) => {
   }
 });
 
+// --- ADD HEALTH CHECK ROUTE ---
+app.get("/healthz", (_req: Request, res: Response) => {
+  res.status(200).send("ok");
+});
+
+// --- SERVER LISTEN ---
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`✅ Aiva Command-Center Online on Port ${PORT}`);
