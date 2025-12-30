@@ -1,3 +1,4 @@
+"use client";
 import React, { useState, useEffect, useRef } from 'react';
 // @ts-ignore
 import ReactMarkdown from 'react-markdown';
@@ -7,9 +8,8 @@ import {
 
 // --- CONFIGURATION ---
 const AIVA_AVATAR = "/aiva.jpg"; 
-// MATCHES YOUR WORKING BACKEND:
 const BACKEND_URL = "https://aiva-npn0.onrender.com/api/generate";
-const SERVER_HOME = "https://aiva-npn0.onrender.com/healthz"; // Using the healthz route we added
+const SERVER_HOME = "https://aiva-npn0.onrender.com/healthz";
 
 export default function App() {
   const [hasStarted, setHasStarted] = useState(false);
@@ -20,15 +20,20 @@ export default function App() {
   const [greeting, setGreeting] = useState("Hey");
   const [serverStatus, setServerStatus] = useState<'checking' | 'online' | 'sleeping'>('checking');
   
+  // FIX: Added currentSessionId to prevent history duplication
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [imgError, setImgError] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   
   const [history, setHistory] = useState<any[]>(() => {
-    const saved = localStorage.getItem('study_vault');
-    return saved ? JSON.parse(saved) : [];
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('study_vault');
+      return saved ? JSON.parse(saved) : [];
+    }
+    return [];
   });
 
-  // 1. AUTO-WAKE: Pings Render immediately on load
+  // 1. AUTO-WAKE
   useEffect(() => {
     const wakeServer = async () => {
       try {
@@ -55,7 +60,7 @@ export default function App() {
     }
   }, [loading]);
 
-  // 3. Greetings & Storage Persistence
+  // 3. Greetings & Storage
   useEffect(() => {
     const hour = new Date().getHours();
     if (hour < 12) setGreeting("Good Morning");
@@ -67,7 +72,7 @@ export default function App() {
     localStorage.setItem('study_vault', JSON.stringify(history)); 
   }, [history]);
 
-  // 4. Auto-Scroll to Bottom
+  // 4. Auto-Scroll
   useEffect(() => {
     if (scrollContainerRef.current) {
       scrollContainerRef.current.scrollTo({ top: scrollContainerRef.current.scrollHeight, behavior: 'smooth' });
@@ -93,19 +98,36 @@ export default function App() {
       });
       
       const data = await response.json();
-      
       if (!response.ok) throw new Error(data.error || "Server error");
 
       const aiText = data.result || "I processed that, but my response was empty.";
+      const aiMsg = { id: (Date.now() + 1).toString(), role: 'aiva', text: aiText };
       
-      setActiveChat(prev => [...prev, { id: (Date.now() + 1).toString(), role: 'aiva', text: aiText }]);
-      setHistory(prev => [{ id: Date.now().toString(), topic: query, content: aiText, timestamp: Date.now() }, ...prev]);
+      setActiveChat(prev => [...prev, aiMsg]);
+
+      // --- UPDATED HISTORY LOGIC ---
+      setHistory(prev => {
+        if (currentSessionId) {
+          // Update existing session in history
+          return prev.map(item => 
+            item.id === currentSessionId 
+              ? { ...item, content: aiText, lastUpdated: Date.now() } 
+              : item
+          );
+        } else {
+          // Create new session entry
+          const newId = Date.now().toString();
+          setCurrentSessionId(newId);
+          return [{ id: newId, topic: query, content: aiText, timestamp: Date.now() }, ...prev];
+        }
+      });
+
       setServerStatus('online');
     } catch (err: any) { 
       setActiveChat(prev => [...prev, { 
         id: Date.now().toString(), 
         role: 'aiva', 
-        text: `⚠️ **Server is warming up.** Render's free tier takes about 50 seconds to boot. \n\n*Error Detail: ${err.message}* \n\nPlease try again in a few seconds!` 
+        text: `⚠️ **Server is warming up.** Render's free tier takes about 50 seconds to boot. \n\nPlease try again in a few seconds!` 
       }]);
       setServerStatus('sleeping');
     } finally { 
@@ -113,7 +135,21 @@ export default function App() {
     }
   };
 
-  const goHome = () => { setHasStarted(false); setActiveChat([]); setTopic(""); };
+  const goHome = () => { 
+    setHasStarted(false); 
+    setActiveChat([]); 
+    setTopic(""); 
+    setCurrentSessionId(null); // Reset session for fresh start
+  };
+
+  const loadFromHistory = (item: any) => {
+    setHasStarted(true);
+    setCurrentSessionId(item.id);
+    setActiveChat([
+      { id: 'h1', role: 'user', text: item.topic },
+      { id: 'h2', role: 'aiva', text: item.content }
+    ]);
+  };
 
   const AivaAvatar = ({ size = "w-10 h-10" }: { size?: string }) => (
     <div className={`${size} rounded-full overflow-hidden border-2 border-indigo-500 shadow-sm flex-shrink-0 bg-indigo-100 flex items-center justify-center`}>
@@ -148,17 +184,18 @@ export default function App() {
           <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2 mb-4">Memory Bank</h2>
           <div className="space-y-2">
             {history.map((item) => (
-              <div key={item.id} onClick={() => { setHasStarted(true); setActiveChat([{id:'1', role:'user', text:item.topic}, {id:'2', role:'aiva', text:item.content}])}}
-                className="group relative p-3 text-sm bg-slate-50 hover:bg-white rounded-xl cursor-pointer transition-all border border-transparent hover:shadow-md"
+              <div key={item.id} onClick={() => loadFromHistory(item)}
+                className={`group relative p-3 text-sm rounded-xl cursor-pointer transition-all border ${currentSessionId === item.id ? 'bg-indigo-50 border-indigo-100 shadow-sm' : 'bg-slate-50 hover:bg-white border-transparent hover:shadow-md'}`}
               >
                 <div className="font-bold text-slate-700 truncate pr-8">{item.topic}</div>
-                <button onClick={(e) => { e.stopPropagation(); setHistory(prev => prev.filter(i => i.id !== item.id)); }} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={14} /></button>
+                <button onClick={(e) => { e.stopPropagation(); setHistory(prev => prev.filter(i => i.id !== item.id)); if(currentSessionId === item.id) goHome(); }} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={14} /></button>
               </div>
             ))}
           </div>
         </div>
       </aside>
 
+      {/* MAIN CONTENT */}
       <main className="flex-1 flex flex-col relative bg-slate-50">
         {!hasStarted ? (
           <div className="flex flex-col items-center justify-center h-full text-center px-6">
