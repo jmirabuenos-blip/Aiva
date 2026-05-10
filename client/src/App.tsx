@@ -1,288 +1,344 @@
-"use client";
 import React, { useState, useEffect, useRef } from 'react';
-// @ts-ignore
-import ReactMarkdown from 'react-markdown';
-import { 
-  Trash2, Send, ArrowLeft, Sparkles, User, Lightbulb, BookOpen, HelpCircle, Activity, Info
-} from 'lucide-react';
+import { Sun, Moon, PanelLeft, Zap } from 'lucide-react';
 
-// --- CONFIGURATION ---
-const AIVA_AVATAR = "/aiva.jpg"; 
-const BACKEND_URL = "https://aiva-npn0.onrender.com/api/generate";
-const SERVER_HOME = "https://aiva-npn0.onrender.com/healthz";
+// ─── HOOKS ────────────────────────────────────────────────────────────────────
+import { useChat } from './hooks/useChat';
 
+// ─── COMPONENTS ───────────────────────────────────────────────────────────────
+import { Avatar }            from './components/Avatar';
+import { StatusPill }        from './components/StatusPill';
+import { InputBox }          from './components/InputBox';
+import { Sidebar }           from './components/Sidebar';
+import { MarkdownRenderer, markdownStyles } from './components/MarkdownRenderer';
+
+// ─── CONSTANTS ────────────────────────────────────────────────────────────────
+import { QUICK_PROMPTS, AIVA_AVATAR } from './constants';
+
+// ─── TYPES ────────────────────────────────────────────────────────────────────
+import type { Theme } from './types';
+
+// ─── GLOBAL STYLES ────────────────────────────────────────────────────────────
+const globalStyles = `
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300&family=DM+Mono:wght@400;500&display=swap');
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  ::-webkit-scrollbar { width: 3px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(128,128,128,.15); border-radius: 2px; }
+  .aiva-root { font-family: 'DM Sans', sans-serif; }
+
+  @keyframes fadeUp { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+  .msg { animation: fadeUp .26s ease forwards; }
+
+  .dots span {
+    display:inline-block; width:5px; height:5px; border-radius:50%;
+    background:currentColor; margin:0 2px;
+    animation: db 1.1s infinite;
+  }
+  .dots span:nth-child(2) { animation-delay:.18s; }
+  .dots span:nth-child(3) { animation-delay:.36s; }
+  @keyframes db { 0%,80%,100%{transform:translateY(0);opacity:.3;} 40%{transform:translateY(-5px);opacity:1;} }
+`;
+
+const LOADING_TEXTS = [
+  "Consulting Llama-3.1…",
+  "Applying Feynman Method…",
+  "Structuring concepts…",
+  "Finalizing response…",
+];
+
+// ─── APP ──────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [hasStarted, setHasStarted] = useState(false);
-  const [topic, setTopic] = useState("");
-  const [activeChat, setActiveChat] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loadingText, setLoadingText] = useState("Thinking...");
-  const [greeting, setGreeting] = useState("Hey");
-  const [serverStatus, setServerStatus] = useState<'checking' | 'online' | 'sleeping'>('checking');
-  
-  // FIX: Added currentSessionId to prevent history duplication
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-  const [imgError, setImgError] = useState(false);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  
-  const [history, setHistory] = useState<any[]>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('study_vault');
-      return saved ? JSON.parse(saved) : [];
-    }
-    return [];
-  });
+  const [theme,       setTheme]       = useState<Theme>('light');
+  const [topic,       setTopic]       = useState('');
+  const [loadingIdx,  setLoadingIdx]  = useState(0);
+  const [greeting,    setGreeting]    = useState('Hello');
+  const [imgError,    setImgError]    = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // 1. AUTO-WAKE
-  useEffect(() => {
-    const wakeServer = async () => {
-      try {
-        const res = await fetch(SERVER_HOME);
-        if (res.ok) setServerStatus('online');
-        else setServerStatus('sleeping');
-      } catch (e) {
-        setServerStatus('sleeping');
-      }
-    };
-    wakeServer();
-  }, []);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef  = useRef<HTMLTextAreaElement>(null);
 
-  // 2. Loading Text Cycles
+  const {
+    activeChat,
+    loading,
+    serverStatus,
+    sessionId,
+    hasStarted,
+    history,
+    sendMessage,
+    loadHistoryItem,
+    deleteHistoryItem,
+    resetChat,
+    pingServer,
+  } = useChat();
+
+  const dark = theme === 'dark';
+
+  useEffect(() => { pingServer(); }, [pingServer]);
+
   useEffect(() => {
-    if (loading) {
-      const texts = ["Consulting Llama-3.1...", "Applying Feynman Method...", "Structuring concepts...", "Finalizing response..."];
-      let i = 0;
-      const interval = setInterval(() => {
-        setLoadingText(texts[i % texts.length]);
-        i++;
-      }, 1500);
-      return () => clearInterval(interval);
-    }
+    if (!loading) return;
+    const id = setInterval(() => setLoadingIdx(i => (i + 1) % LOADING_TEXTS.length), 1800);
+    return () => clearInterval(id);
   }, [loading]);
 
-  // 3. Greetings & Storage
   useEffect(() => {
-    const hour = new Date().getHours();
-    if (hour < 12) setGreeting("Good Morning");
-    else if (hour < 18) setGreeting("Good Afternoon");
-    else setGreeting("Good Evening");
+    const h = new Date().getHours();
+    setGreeting(h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening');
   }, []);
 
-  useEffect(() => { 
-    localStorage.setItem('study_vault', JSON.stringify(history)); 
-  }, [history]);
-
-  // 4. Auto-Scroll
   useEffect(() => {
-    if (scrollContainerRef.current) {
-      scrollContainerRef.current.scrollTo({ top: scrollContainerRef.current.scrollHeight, behavior: 'smooth' });
-    }
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [activeChat, loading]);
 
-  const handleGenerate = async (forcedTopic?: string) => {
-    const query = forcedTopic || topic;
-    if (!query.trim()) return;
-    
-    if (!forcedTopic) setTopic(""); 
-    setHasStarted(true);
-    setLoading(true);
-    
-    const userMsg = { id: Date.now().toString(), role: 'user', text: query };
-    setActiveChat(prev => [...prev, userMsg]);
-
-    try {
-      const response = await fetch(BACKEND_URL, {
-        method: "POST", 
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic: query }),
-      });
-      
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Server error");
-
-      const aiText = data.result || "I processed that, but my response was empty.";
-      const aiMsg = { id: (Date.now() + 1).toString(), role: 'aiva', text: aiText };
-      
-      setActiveChat(prev => [...prev, aiMsg]);
-
-      // --- UPDATED HISTORY LOGIC ---
-      setHistory(prev => {
-        if (currentSessionId) {
-          // Update existing session in history
-          return prev.map(item => 
-            item.id === currentSessionId 
-              ? { ...item, content: aiText, lastUpdated: Date.now() } 
-              : item
-          );
-        } else {
-          // Create new session entry
-          const newId = Date.now().toString();
-          setCurrentSessionId(newId);
-          return [{ id: newId, topic: query, content: aiText, timestamp: Date.now() }, ...prev];
-        }
-      });
-
-      setServerStatus('online');
-    } catch (err: any) { 
-      setActiveChat(prev => [...prev, { 
-        id: Date.now().toString(), 
-        role: 'aiva', 
-        text: `⚠️ **Server is warming up.** Render's free tier takes about 50 seconds to boot. \n\nPlease try again in a few seconds!` 
-      }]);
-      setServerStatus('sleeping');
-    } finally { 
-      setLoading(false); 
-    }
+  const handleGenerate = (forced?: string) => {
+    const query = (forced || topic).trim();
+    if (!query) return;
+    setTopic('');
+    if (inputRef.current) inputRef.current.style.height = 'auto';
+    setSidebarOpen(false);
+    sendMessage(query);
   };
 
-  const goHome = () => { 
-    setHasStarted(false); 
-    setActiveChat([]); 
-    setTopic(""); 
-    setCurrentSessionId(null); // Reset session for fresh start
+  const handleHome = () => {
+    resetChat();
+    setTopic('');
+    setSidebarOpen(false);
   };
 
-  const loadFromHistory = (item: any) => {
-    setHasStarted(true);
-    setCurrentSessionId(item.id);
-    setActiveChat([
-      { id: 'h1', role: 'user', text: item.topic },
-      { id: 'h2', role: 'aiva', text: item.content }
-    ]);
+  const handleDeleteItem = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    deleteHistoryItem(id);
+    if (sessionId === id) handleHome();
   };
-
-  const AivaAvatar = ({ size = "w-10 h-10" }: { size?: string }) => (
-    <div className={`${size} rounded-full overflow-hidden border-2 border-indigo-500 shadow-sm flex-shrink-0 bg-indigo-100 flex items-center justify-center`}>
-      {!imgError ? (
-        <img src={AIVA_AVATAR} onError={() => setImgError(true)} alt="Aiva" className="w-full h-full object-cover" />
-      ) : (
-        <User className="text-indigo-400" size={20} />
-      )}
-    </div>
-  );
 
   return (
-    <div className="flex h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden">
-      
-      {/* SIDEBAR */}
-      <aside className="w-80 bg-white border-r border-slate-200 flex flex-col hidden lg:flex">
-        <div onClick={goHome} className="p-6 border-b flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-all">
-          <div className="flex items-center gap-3">
-            <AivaAvatar size="w-10 h-10" />
-            <span className="text-xl font-black tracking-tighter uppercase italic text-indigo-600">Aiva</span>
-          </div>
-          <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-[8px] font-black uppercase border ${
-            serverStatus === 'online' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 
-            serverStatus === 'checking' ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-rose-50 text-rose-600 border-rose-200'
-          }`}>
-            <Activity size={10} className={serverStatus === 'checking' ? 'animate-spin' : ''} />
-            {serverStatus}
-          </div>
-        </div>
-        
-        <div className="flex-1 overflow-y-auto p-4 space-y-2">
-          <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2 mb-4">Memory Bank</h2>
-          <div className="space-y-2">
-            {history.map((item) => (
-              <div key={item.id} onClick={() => loadFromHistory(item)}
-                className={`group relative p-3 text-sm rounded-xl cursor-pointer transition-all border ${currentSessionId === item.id ? 'bg-indigo-50 border-indigo-100 shadow-sm' : 'bg-slate-50 hover:bg-white border-transparent hover:shadow-md'}`}
-              >
-                <div className="font-bold text-slate-700 truncate pr-8">{item.topic}</div>
-                <button onClick={(e) => { e.stopPropagation(); setHistory(prev => prev.filter(i => i.id !== item.id)); if(currentSessionId === item.id) goHome(); }} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={14} /></button>
-              </div>
-            ))}
-          </div>
-        </div>
+    <div className={`aiva-root flex h-screen overflow-hidden transition-colors duration-200 ${
+      dark ? 'bg-[#0f0f11] text-white' : 'bg-[#f0efe9] text-slate-900'
+    }`}>
+      <style>{globalStyles + markdownStyles}</style>
+
+      {/* Desktop Sidebar */}
+      <aside className={`w-60 hidden lg:flex flex-col flex-shrink-0 border-r ${
+        dark ? 'border-white/6' : 'border-black/6'
+      }`}>
+        <Sidebar
+          dark={dark}
+          serverStatus={serverStatus}
+          history={history}
+          sessionId={sessionId}
+          onHome={handleHome}
+          onLoadItem={item => { loadHistoryItem(item); setSidebarOpen(false); }}
+          onDeleteItem={handleDeleteItem}
+        />
       </aside>
 
-      {/* MAIN CONTENT */}
-      <main className="flex-1 flex flex-col relative bg-slate-50">
-        {!hasStarted ? (
-          <div className="flex flex-col items-center justify-center h-full text-center px-6">
-             <div className="mb-6 relative">
-                <div className="w-48 h-48 rounded-[3rem] overflow-hidden shadow-2xl border-4 border-white bg-white">
-                   <img src={AIVA_AVATAR} alt="Aiva" className="w-full h-full object-cover" />
-                </div>
-                <div className="absolute -bottom-2 -right-2 bg-indigo-600 text-white p-3 rounded-2xl shadow-lg animate-bounce">
-                  <Sparkles size={24} />
-                </div>
-             </div>
-             <div className="space-y-1 mb-8">
-                <span className="px-4 py-1.5 bg-indigo-100 text-indigo-700 rounded-full text-sm font-bold">{greeting}!</span>
-                <h1 className="text-7xl font-black text-slate-900 tracking-tighter italic">I am Aiva.</h1>
-             </div>
-             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 max-w-2xl w-full mb-10">
-                <button onClick={() => handleGenerate("Explain Quantum Physics")} className="flex items-center gap-3 p-4 bg-white border rounded-2xl hover:border-indigo-500 transition-all group">
-                  <div className="p-2 bg-amber-50 text-amber-600 rounded-lg group-hover:bg-amber-600 group-hover:text-white"><Lightbulb size={20}/></div>
-                  <span className="font-bold text-[10px] uppercase tracking-tighter">Concept Mentor</span>
-                </button>
-                <button onClick={() => handleGenerate("Summarize The Silk Road")} className="flex items-center gap-3 p-4 bg-white border rounded-2xl hover:border-indigo-500 transition-all group">
-                  <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg group-hover:bg-emerald-600 group-hover:text-white"><BookOpen size={20}/></div>
-                  <span className="font-bold text-[10px] uppercase tracking-tighter">Memory Architect</span>
-                </button>
-                <button onClick={() => handleGenerate("Quiz me on Cell Biology")} className="flex items-center gap-3 p-4 bg-white border rounded-2xl hover:border-indigo-500 transition-all group">
-                  <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg group-hover:bg-indigo-600 group-hover:text-white"><HelpCircle size={20}/></div>
-                  <span className="font-bold text-[10px] uppercase tracking-tighter">Quiz Master</span>
-                </button>
-             </div>
-             <button onClick={() => setHasStarted(true)} className="bg-indigo-600 text-white px-12 py-6 rounded-full text-xl font-black shadow-2xl hover:bg-indigo-700 transition-all">NEW CHAT</button>
+      {/* Mobile Sidebar */}
+      {sidebarOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm lg:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+          <div className={`fixed left-0 top-0 bottom-0 w-64 z-50 lg:hidden border-r ${
+            dark ? 'border-white/6' : 'border-black/6'
+          }`}>
+            <Sidebar
+              dark={dark}
+              serverStatus={serverStatus}
+              history={history}
+              sessionId={sessionId}
+              onHome={handleHome}
+              onLoadItem={item => { loadHistoryItem(item); setSidebarOpen(false); }}
+              onDeleteItem={handleDeleteItem}
+            />
           </div>
-        ) : (
-          <>
-            <div className="bg-white/90 backdrop-blur-md border-b p-4 flex items-center justify-between sticky top-0 z-10">
-              <button onClick={goHome} className="flex items-center gap-2 text-slate-400 hover:text-indigo-600 font-bold text-xs"><ArrowLeft size={14} /> HOME</button>
-              <div className="flex items-center gap-2">
-                <AivaAvatar size="w-7 h-7" />
-                <span className="text-[10px] font-black uppercase tracking-widest text-indigo-500">AIVA ASSISTANT</span>
+        </>
+      )}
+
+      {/* Main */}
+      <main className="flex-1 flex flex-col min-w-0 relative">
+
+        {/* Header */}
+        <header className={`flex items-center justify-between px-5 py-3 border-b sticky top-0 z-10 backdrop-blur-md ${
+          dark ? 'bg-[#0f0f11]/80 border-white/6' : 'bg-[#f0efe9]/80 border-black/6'
+        }`}>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className={`lg:hidden p-1.5 rounded-lg transition-all ${
+                dark ? 'text-white/35 hover:text-white/70 hover:bg-white/5' : 'text-slate-400 hover:text-slate-700 hover:bg-black/5'
+              }`}
+            >
+              <PanelLeft size={16} />
+            </button>
+            <button onClick={handleHome} className="flex items-center gap-2.5">
+              <Avatar size={26} dark={dark} />
+              <span className={`text-sm font-semibold ${dark ? 'text-white/80' : 'text-slate-700'}`}>
+                Aiva
+              </span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            {hasStarted && <StatusPill serverStatus={serverStatus} dark={dark} />}
+            <button
+              onClick={() => setTheme((t: Theme) => t === 'light' ? 'dark' : 'light')}
+              className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
+                dark ? 'text-white/40 hover:text-white/80 hover:bg-white/6' : 'text-slate-400 hover:text-slate-700 hover:bg-black/5'
+              }`}
+              title="Toggle theme"
+            >
+              {dark ? <Sun size={15} /> : <Moon size={15} />}
+            </button>
+          </div>
+        </header>
+
+        {/* ── HOME SCREEN ── */}
+        {!hasStarted && (
+          <div className="flex-1 flex flex-col items-center justify-center px-6 py-12 overflow-y-auto text-center">
+            <div className="relative mb-7">
+              <div className={`w-20 h-20 rounded-2xl overflow-hidden ring-1 shadow-xl ${
+                dark ? 'ring-white/10' : 'ring-black/8'
+              }`}>
+                {!imgError
+                  ? <img src={AIVA_AVATAR} onError={() => setImgError(true)} alt="Aiva" className="w-full h-full object-cover" />
+                  : <div className={`w-full h-full flex items-center justify-center ${dark ? 'bg-blue-900/40' : 'bg-blue-50'}`}>
+                      <Zap size={32} className="text-blue-400" />
+                    </div>
+                }
               </div>
-              <div className="w-12"></div>
+              <div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center ring-2 ${
+                serverStatus === 'online'   ? 'bg-emerald-500' :
+                serverStatus === 'checking' ? 'bg-amber-400'   : 'bg-red-400'
+              } ${dark ? 'ring-[#0f0f11]' : 'ring-[#f0efe9]'}`}>
+                <Zap size={10} className="text-white" fill="white" />
+              </div>
             </div>
 
-            <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-6 flex flex-col items-center">
-              <div className="w-full max-w-3xl space-y-8 pb-48">
-                {activeChat.map((msg) => (
-                  <div key={msg.id} className={`flex items-start gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                    {msg.role === 'aiva' && <AivaAvatar size="w-9 h-9" />}
-                    <div className={`max-w-[85%] px-6 py-4 rounded-[2rem] shadow-sm ${msg.role === 'user' ? 'bg-slate-800 text-white rounded-tr-none' : 'bg-white text-slate-700 border border-slate-100 rounded-tl-none'}`}>
-                      <div className={`prose prose-sm ${msg.role === 'user' ? 'prose-invert' : 'prose-slate'} max-w-none`}>
-                        <ReactMarkdown>{msg.text}</ReactMarkdown>
+            <p className={`text-sm font-medium mb-1.5 ${dark ? 'text-white/30' : 'text-slate-400'}`}>{greeting}</p>
+            <h1 className={`text-3xl font-bold tracking-tight mb-2.5 ${dark ? 'text-white' : 'text-slate-900'}`}>
+              I'm Aiva.
+            </h1>
+            <p className={`text-sm leading-relaxed max-w-sm mb-10 ${dark ? 'text-white/38' : 'text-slate-400'}`}>
+              Your AI-powered study companion. Ask me anything — concepts, summaries, or quizzes.
+            </p>
+
+            <div className="flex flex-wrap justify-center gap-2 mb-9 max-w-md">
+              {QUICK_PROMPTS.map(({ label, query, icon: Icon }) => (
+                <button
+                  key={label}
+                  onClick={() => handleGenerate(query)}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium border transition-all ${
+                    dark
+                      ? 'bg-white/4 border-white/8 text-white/60 hover:text-white hover:bg-white/8 hover:border-white/14'
+                      : 'bg-white border-black/8 text-slate-600 hover:text-slate-900 hover:border-black/14 shadow-sm hover:shadow'
+                  }`}
+                >
+                  <Icon size={13} />
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <div className="w-full max-w-lg">
+              <InputBox
+                topic={topic}
+                setTopic={setTopic}
+                loading={loading}
+                dark={dark}
+                inputRef={inputRef}
+                onGenerate={handleGenerate}
+                placeholder="What do you want to learn today?"
+              />
+              <p className={`text-center text-[11px] mt-2.5 ${dark ? 'text-white/15' : 'text-slate-300'}`}>
+                Enter to send · Shift+Enter for new line
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* ── CHAT SCREEN ── */}
+        {hasStarted && (
+          <>
+            <div ref={scrollRef} className="flex-1 overflow-y-auto">
+              <div className="max-w-2xl mx-auto px-4 py-8 space-y-7 pb-44">
+                {activeChat.map((msg, i) => (
+                  <div
+                    key={msg.id}
+                    className="msg"
+                    style={{ animationDelay: `${i * 0.04}s`, animationFillMode: 'both' }}
+                  >
+                    {msg.role === 'user' ? (
+                      <div className="flex justify-end">
+                        <div className={`max-w-[78%] rounded-2xl rounded-tr-md px-4 py-3 ${
+                          dark ? 'bg-white/8 border border-white/6' : 'bg-white border border-black/6 shadow-sm'
+                        }`}>
+                          <MarkdownRenderer content={msg.text} variant="user" dark={dark} />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-start gap-3">
+                        <Avatar size={28} dark={dark} />
+                        <div className="flex-1 min-w-0 pt-0.5">
+                          <p className={`text-[10px] font-bold uppercase tracking-widest mb-2 ${
+                            dark ? 'text-blue-400/60' : 'text-blue-500/60'
+                          }`}>
+                            Aiva
+                          </p>
+                          <MarkdownRenderer content={msg.text} variant="aiva" dark={dark} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                {loading && (
+                  <div className="flex items-start gap-3 msg">
+                    <Avatar size={28} dark={dark} />
+                    <div className="pt-1">
+                      <p className={`text-[10px] font-bold uppercase tracking-widest mb-3 ${
+                        dark ? 'text-blue-400/60' : 'text-blue-500/60'
+                      }`}>
+                        Aiva
+                      </p>
+                      <div className="flex items-center gap-3">
+                        <span className={`dots flex ${dark ? 'text-white/25' : 'text-slate-300'}`}>
+                          <span /><span /><span />
+                        </span>
+                        <span className={`text-[11px] font-medium ${dark ? 'text-white/22' : 'text-slate-300'}`}>
+                          {LOADING_TEXTS[loadingIdx]}
+                        </span>
                       </div>
                     </div>
                   </div>
-                ))}
-                {loading && (
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 bg-slate-200 rounded-full animate-pulse" />
-                      <div className="bg-white px-6 py-4 rounded-2xl rounded-tl-none shadow-sm border animate-pulse">
-                        <span className="text-[10px] font-bold uppercase text-slate-400 tracking-widest">{loadingText}</span>
-                      </div>
-                    </div>
                 )}
               </div>
             </div>
 
-            <div className="absolute bottom-0 left-0 right-0 p-8 bg-gradient-to-t from-slate-50 to-transparent">
-              <div className="max-w-3xl mx-auto flex flex-col gap-2 bg-white p-2 rounded-[2rem] shadow-2xl border">
-                <textarea 
-                  rows={1}
-                  className="w-full p-4 text-lg outline-none bg-transparent font-medium px-6 resize-none"
-                  placeholder="Ask me anything..."
-                  value={topic}
-                  onChange={(e) => setTopic(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleGenerate())}
+            {/* Floating Input */}
+            <div className={`absolute bottom-0 left-0 right-0 px-4 pb-5 pt-12 bg-gradient-to-t ${
+              dark ? 'from-[#0f0f11] via-[#0f0f11]/90' : 'from-[#f0efe9] via-[#f0efe9]/90'
+            } to-transparent`}>
+              <div className="max-w-2xl mx-auto">
+                <InputBox
+                  topic={topic}
+                  setTopic={setTopic}
+                  loading={loading}
+                  dark={dark}
+                  inputRef={inputRef}
+                  onGenerate={handleGenerate}
+                  placeholder="Ask a follow-up…"
                 />
-                <div className="flex justify-between items-center px-4 pb-2">
-                   <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-300 uppercase">
-                     <Info size={12} /> Shift + Enter for new line
-                   </div>
-                   <button onClick={() => handleGenerate()} className="bg-indigo-600 text-white p-4 rounded-full hover:scale-105 transition-all shadow-lg">
-                    <Send size={20} />
-                  </button>
-                </div>
+                <p className={`text-center text-[10px] mt-2 ${dark ? 'text-white/12' : 'text-slate-300'}`}>
+                  Enter to send · Shift+Enter for new line
+                </p>
               </div>
             </div>
           </>
         )}
+
       </main>
     </div>
   );
