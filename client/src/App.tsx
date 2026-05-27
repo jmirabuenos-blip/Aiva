@@ -9,7 +9,7 @@ import { InputBox }          from './components/InputBox';
 import { Sidebar }           from './components/Sidebar';
 import { MarkdownRenderer, markdownStyles } from './components/MarkdownRenderer';
 
-import { QUICK_PROMPTS, AIVA_AVATAR } from './constants';
+import { AIVA_AVATAR } from './constants';
 import type { Theme } from './types';
 
 const globalStyles = `
