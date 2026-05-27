@@ -1,43 +1,63 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Sun, Moon, PanelLeft, Zap } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Sun, Moon, PanelLeft, Zap, Copy, Check, RefreshCw, ChevronDown } from 'lucide-react';
 
-// ─── HOOKS ────────────────────────────────────────────────────────────────────
 import { useChat } from './hooks/useChat';
 
-// ─── COMPONENTS ───────────────────────────────────────────────────────────────
 import { Avatar }            from './components/Avatar';
 import { StatusPill }        from './components/StatusPill';
 import { InputBox }          from './components/InputBox';
 import { Sidebar }           from './components/Sidebar';
 import { MarkdownRenderer, markdownStyles } from './components/MarkdownRenderer';
 
-// ─── CONSTANTS ────────────────────────────────────────────────────────────────
 import { QUICK_PROMPTS, AIVA_AVATAR } from './constants';
-
-// ─── TYPES ────────────────────────────────────────────────────────────────────
 import type { Theme } from './types';
 
-// ─── GLOBAL STYLES ────────────────────────────────────────────────────────────
 const globalStyles = `
-  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300&family=DM+Mono:wght@400;500&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
   * { box-sizing: border-box; }
   body { margin: 0; }
+
   ::-webkit-scrollbar { width: 3px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: rgba(128,128,128,.15); border-radius: 2px; }
-  .aiva-root { font-family: 'DM Sans', sans-serif; }
+  ::-webkit-scrollbar-thumb { background: rgba(128,128,128,.12); border-radius: 2px; }
 
-  @keyframes fadeUp { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
-  .msg { animation: fadeUp .26s ease forwards; }
+  .aiva-root { font-family: 'Sora', sans-serif; }
 
-  .dots span {
-    display:inline-block; width:5px; height:5px; border-radius:50%;
-    background:currentColor; margin:0 2px;
-    animation: db 1.1s infinite;
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
   }
-  .dots span:nth-child(2) { animation-delay:.18s; }
-  .dots span:nth-child(3) { animation-delay:.36s; }
-  @keyframes db { 0%,80%,100%{transform:translateY(0);opacity:.3;} 40%{transform:translateY(-5px);opacity:1;} }
+  .msg { animation: fadeUp .32s cubic-bezier(.22,.68,0,1.2) forwards; opacity: 0; }
+
+  @keyframes shimmer {
+    0%,100% { opacity: .35; } 50% { opacity: .85; }
+  }
+  .dots span {
+    display: inline-block; width: 4px; height: 4px; border-radius: 50%;
+    background: currentColor; margin: 0 2px;
+    animation: shimmer 1.4s ease infinite;
+  }
+  .dots span:nth-child(2) { animation-delay: .22s; }
+  .dots span:nth-child(3) { animation-delay: .44s; }
+
+  @keyframes pulse-ring {
+    0%   { transform: scale(1); opacity: .5; }
+    100% { transform: scale(2.4); opacity: 0; }
+  }
+  .status-ring { animation: pulse-ring 2s ease infinite; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spin { animation: spin .8s linear infinite; }
+
+  @keyframes popIn {
+    from { opacity: 0; transform: scale(.85) translateY(6px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .pop-in { animation: popIn .2s cubic-bezier(.22,.68,0,1.2) forwards; }
+
+  .msg-actions { opacity: 0; transition: opacity .15s; }
+  .msg-wrap:hover .msg-actions { opacity: 1; }
 `;
 
 const LOADING_TEXTS = [
@@ -47,30 +67,54 @@ const LOADING_TEXTS = [
   "Finalizing response…",
 ];
 
-// ─── APP ──────────────────────────────────────────────────────────────────────
+// ─── COPY BUTTON ─────────────────────────────────────────────────────────────
+function CopyButton({ text, dark }: { text: string; dark: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const handle = () => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    });
+  };
+  return (
+    <button
+      onClick={handle}
+      title="Copy"
+      style={{
+        display: 'flex', alignItems: 'center', gap: 4,
+        padding: '4px 8px', borderRadius: 6, border: 'none', cursor: 'pointer',
+        fontSize: 11, fontWeight: 500, transition: 'all .15s',
+        background: copied
+          ? (dark ? 'rgba(74,222,128,.12)' : 'rgba(74,222,128,.15)')
+          : (dark ? 'rgba(255,255,255,.06)' : 'rgba(0,0,0,.05)'),
+        color: copied
+          ? (dark ? '#4ade80' : '#166534')
+          : (dark ? 'rgba(255,255,255,.35)' : 'rgba(0,0,0,.35)'),
+      }}
+    >
+      {copied ? <Check size={11} /> : <Copy size={11} />}
+      {copied ? 'Copied' : 'Copy'}
+    </button>
+  );
+}
+
+// ─── APP ─────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [theme,       setTheme]       = useState<Theme>('light');
-  const [topic,       setTopic]       = useState('');
-  const [loadingIdx,  setLoadingIdx]  = useState(0);
-  const [greeting,    setGreeting]    = useState('Hello');
-  const [imgError,    setImgError]    = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [theme,        setTheme]        = useState<Theme>('dark');
+  const [topic,        setTopic]        = useState('');
+  const [loadingIdx,   setLoadingIdx]   = useState(0);
+  const [greeting,     setGreeting]     = useState('Hello');
+  const [imgError,     setImgError]     = useState(false);
+  const [sidebarOpen,  setSidebarOpen]  = useState(false);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef  = useRef<HTMLTextAreaElement>(null);
 
   const {
-    activeChat,
-    loading,
-    serverStatus,
-    sessionId,
-    hasStarted,
-    history,
-    sendMessage,
-    loadHistoryItem,
-    deleteHistoryItem,
-    resetChat,
-    pingServer,
+    activeChat, loading, serverStatus, sessionId,
+    hasStarted, history, sendMessage, loadHistoryItem,
+    deleteHistoryItem, resetChat, pingServer,
   } = useChat();
 
   const dark = theme === 'dark';
@@ -88,17 +132,36 @@ export default function App() {
     setGreeting(h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening');
   }, []);
 
+  // Auto-scroll + show scroll button
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    const el = scrollRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (atBottom) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   }, [activeChat, loading]);
 
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setShowScrollBtn(el.scrollHeight - el.scrollTop - el.clientHeight > 120);
+  }, []);
+
+  const scrollToBottom = () => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  };
+
   const handleGenerate = (forced?: string) => {
-    const query = (forced || topic).trim();
+    const query = (typeof forced === 'string' ? forced : topic).trim();
     if (!query) return;
     setTopic('');
     if (inputRef.current) inputRef.current.style.height = 'auto';
     setSidebarOpen(false);
     sendMessage(query);
+  };
+
+  const handleRegenerate = () => {
+    const lastUser = [...activeChat].reverse().find(m => m.role === 'user');
+    if (lastUser) sendMessage(lastUser.text);
   };
 
   const handleHome = () => {
@@ -114,42 +177,46 @@ export default function App() {
   };
 
   return (
-    <div className={`aiva-root flex h-screen overflow-hidden transition-colors duration-200 ${
-      dark ? 'bg-[#0f0f11] text-white' : 'bg-[#f0efe9] text-slate-900'
-    }`}>
+    <div
+      className="aiva-root"
+      style={{
+        display: 'flex', height: '100vh', overflow: 'hidden',
+        background: dark ? '#0e0e10' : '#f6f5f1',
+        color: dark ? '#e8e4dc' : '#1c1a17',
+        transition: 'background .2s, color .2s',
+      }}
+    >
       <style>{globalStyles + markdownStyles}</style>
 
-      {/* Desktop Sidebar */}
-      <aside className={`w-60 hidden lg:flex flex-col flex-shrink-0 border-r ${
-        dark ? 'border-white/6' : 'border-black/6'
-      }`}>
+      {/* ── Desktop Sidebar ── */}
+      <aside style={{
+        width: 232, flexShrink: 0,
+        borderRight: `1px solid ${dark ? 'rgba(255,255,255,.06)' : 'rgba(0,0,0,.06)'}`,
+        display: 'none',
+      }} className="lg-sidebar">
+        <style>{`@media(min-width:1024px){.lg-sidebar{display:flex!important;flex-direction:column}}`}</style>
         <Sidebar
-          dark={dark}
-          serverStatus={serverStatus}
-          history={history}
-          sessionId={sessionId}
-          onHome={handleHome}
+          dark={dark} serverStatus={serverStatus} history={history}
+          sessionId={sessionId} onHome={handleHome}
           onLoadItem={item => { loadHistoryItem(item); setSidebarOpen(false); }}
           onDeleteItem={handleDeleteItem}
         />
       </aside>
 
-      {/* Mobile Sidebar */}
+      {/* ── Mobile Sidebar ── */}
       {sidebarOpen && (
         <>
-          <div
-            className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm lg:hidden"
-            onClick={() => setSidebarOpen(false)}
-          />
-          <div className={`fixed left-0 top-0 bottom-0 w-64 z-50 lg:hidden border-r ${
-            dark ? 'border-white/6' : 'border-black/6'
-          }`}>
+          <div onClick={() => setSidebarOpen(false)} style={{
+            position: 'fixed', inset: 0, zIndex: 40,
+            background: 'rgba(0,0,0,.55)', backdropFilter: 'blur(4px)',
+          }} />
+          <div style={{
+            position: 'fixed', left: 0, top: 0, bottom: 0, width: 256, zIndex: 50,
+            borderRight: `1px solid ${dark ? 'rgba(255,255,255,.06)' : 'rgba(0,0,0,.06)'}`,
+          }}>
             <Sidebar
-              dark={dark}
-              serverStatus={serverStatus}
-              history={history}
-              sessionId={sessionId}
-              onHome={handleHome}
+              dark={dark} serverStatus={serverStatus} history={history}
+              sessionId={sessionId} onHome={handleHome}
               onLoadItem={item => { loadHistoryItem(item); setSidebarOpen(false); }}
               onDeleteItem={handleDeleteItem}
             />
@@ -157,102 +224,114 @@ export default function App() {
         </>
       )}
 
-      {/* Main */}
-      <main className="flex-1 flex flex-col min-w-0 relative">
+      {/* ── Main ── */}
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, position: 'relative' }}>
 
         {/* Header */}
-        <header className={`flex items-center justify-between px-5 py-3 border-b sticky top-0 z-10 backdrop-blur-md ${
-          dark ? 'bg-[#0f0f11]/80 border-white/6' : 'bg-[#f0efe9]/80 border-black/6'
-        }`}>
-          <div className="flex items-center gap-3">
+        <header style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0 20px', height: 52,
+          borderBottom: `1px solid ${dark ? 'rgba(255,255,255,.05)' : 'rgba(0,0,0,.05)'}`,
+          position: 'sticky', top: 0, zIndex: 10,
+          background: dark ? 'rgba(14,14,16,.9)' : 'rgba(246,245,241,.9)',
+          backdropFilter: 'blur(12px)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <button
               onClick={() => setSidebarOpen(true)}
-              className={`lg:hidden p-1.5 rounded-lg transition-all ${
-                dark ? 'text-white/35 hover:text-white/70 hover:bg-white/5' : 'text-slate-400 hover:text-slate-700 hover:bg-black/5'
-              }`}
+              className="mobile-only"
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: 32, height: 32, borderRadius: 8, border: 'none',
+                background: 'transparent', cursor: 'pointer',
+                color: dark ? 'rgba(255,255,255,.3)' : 'rgba(0,0,0,.3)',
+              }}
             >
-              <PanelLeft size={16} />
+              <PanelLeft size={15} />
             </button>
-            <button onClick={handleHome} className="flex items-center gap-2.5">
-              <Avatar size={26} dark={dark} />
-              <span className={`text-sm font-semibold ${dark ? 'text-white/80' : 'text-slate-700'}`}>
+            <style>{`@media(min-width:1024px){.mobile-only{display:none!important}}`}</style>
+
+            <button onClick={handleHome} style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+              <Avatar size={24} dark={dark} />
+              <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: '0.02em', color: dark ? 'rgba(232,228,220,.9)' : 'rgba(28,26,23,.85)' }}>
                 Aiva
               </span>
             </button>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {hasStarted && <StatusPill serverStatus={serverStatus} dark={dark} />}
             <button
               onClick={() => setTheme((t: Theme) => t === 'light' ? 'dark' : 'light')}
-              className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
-                dark ? 'text-white/40 hover:text-white/80 hover:bg-white/6' : 'text-slate-400 hover:text-slate-700 hover:bg-black/5'
-              }`}
-              title="Toggle theme"
+              style={{
+                width: 32, height: 32, borderRadius: 8, border: 'none',
+                background: 'transparent', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: dark ? 'rgba(255,255,255,.3)' : 'rgba(0,0,0,.3)',
+              }}
             >
-              {dark ? <Sun size={15} /> : <Moon size={15} />}
+              {dark ? <Sun size={14} /> : <Moon size={14} />}
             </button>
           </div>
         </header>
 
         {/* ── HOME SCREEN ── */}
         {!hasStarted && (
-          <div className="flex-1 flex flex-col items-center justify-center px-6 py-12 overflow-y-auto text-center">
-            <div className="relative mb-7">
-              <div className={`w-20 h-20 rounded-2xl overflow-hidden ring-1 shadow-xl ${
-                dark ? 'ring-white/10' : 'ring-black/8'
-              }`}>
+          <div style={{
+            flex: 1, display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+            padding: '48px 24px', overflowY: 'auto', textAlign: 'center',
+          }}>
+            {/* Avatar + status ring */}
+            <div style={{ position: 'relative', marginBottom: 28 }}>
+              <div style={{
+                width: 72, height: 72, borderRadius: 20, overflow: 'hidden',
+                border: `1px solid ${dark ? 'rgba(255,255,255,.08)' : 'rgba(0,0,0,.07)'}`,
+              }}>
                 {!imgError
-                  ? <img src={AIVA_AVATAR} onError={() => setImgError(true)} alt="Aiva" className="w-full h-full object-cover" />
-                  : <div className={`w-full h-full flex items-center justify-center ${dark ? 'bg-blue-900/40' : 'bg-blue-50'}`}>
-                      <Zap size={32} className="text-blue-400" />
+                  ? <img src={AIVA_AVATAR} onError={() => setImgError(true)} alt="Aiva" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: dark ? '#1a1a2e' : '#eef2ff' }}>
+                      <Zap size={28} style={{ color: '#c9a96e' }} />
                     </div>
                 }
               </div>
-              <div className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center ring-2 ${
-                serverStatus === 'online'   ? 'bg-emerald-500' :
-                serverStatus === 'checking' ? 'bg-amber-400'   : 'bg-red-400'
-              } ${dark ? 'ring-[#0f0f11]' : 'ring-[#f0efe9]'}`}>
-                <Zap size={10} className="text-white" fill="white" />
+              <div style={{
+                position: 'absolute', bottom: -3, right: -3, width: 16, height: 16,
+                borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                border: `2.5px solid ${dark ? '#0e0e10' : '#f6f5f1'}`,
+                background: serverStatus === 'online' ? '#4ade80' : serverStatus === 'checking' ? '#fbbf24' : '#94a3b8',
+              }}>
+                <span className="status-ring" style={{
+                  position: 'absolute', width: '100%', height: '100%', borderRadius: '50%',
+                  background: serverStatus === 'online' ? '#4ade80' : serverStatus === 'checking' ? '#fbbf24' : '#94a3b8',
+                }} />
               </div>
             </div>
 
-            <p className={`text-sm font-medium mb-1.5 ${dark ? 'text-white/30' : 'text-slate-400'}`}>{greeting}</p>
-            <h1 className={`text-3xl font-bold tracking-tight mb-2.5 ${dark ? 'text-white' : 'text-slate-900'}`}>
-              I'm Aiva.
+            <p style={{ fontSize: 11, fontWeight: 500, letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 8, color: dark ? 'rgba(255,255,255,.25)' : 'rgba(0,0,0,.3)' }}>
+              {greeting}
+            </p>
+            <h1 style={{
+              fontSize: 'clamp(28px, 5vw, 38px)', fontWeight: 300, letterSpacing: '-0.02em',
+              margin: '0 0 10px', color: dark ? '#e8e4dc' : '#1c1a17', lineHeight: 1.1,
+            }}>
+              I'm <span style={{ fontWeight: 600 }}>Aiva.</span>
             </h1>
-            <p className={`text-sm leading-relaxed max-w-sm mb-10 ${dark ? 'text-white/38' : 'text-slate-400'}`}>
+            <p style={{
+              fontSize: 14, lineHeight: 1.7, maxWidth: 320, margin: '0 0 36px',
+              color: dark ? 'rgba(232,228,220,.38)' : 'rgba(28,26,23,.42)', fontWeight: 300,
+            }}>
               Your AI-powered study companion. Ask me anything — concepts, summaries, or quizzes.
             </p>
 
-            <div className="flex flex-wrap justify-center gap-2 mb-9 max-w-md">
-              {QUICK_PROMPTS.map(({ label, query, icon: Icon }) => (
-                <button
-                  key={label}
-                  onClick={() => handleGenerate(query)}
-                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium border transition-all ${
-                    dark
-                      ? 'bg-white/4 border-white/8 text-white/60 hover:text-white hover:bg-white/8 hover:border-white/14'
-                      : 'bg-white border-black/8 text-slate-600 hover:text-slate-900 hover:border-black/14 shadow-sm hover:shadow'
-                  }`}
-                >
-                  <Icon size={13} />
-                  {label}
-                </button>
-              ))}
-            </div>
 
-            <div className="w-full max-w-lg">
+            <div style={{ width: '100%', maxWidth: 480 }}>
               <InputBox
-                topic={topic}
-                setTopic={setTopic}
-                loading={loading}
-                dark={dark}
-                inputRef={inputRef}
-                onGenerate={handleGenerate}
+                topic={topic} setTopic={setTopic} loading={loading}
+                dark={dark} inputRef={inputRef} onGenerate={handleGenerate}
                 placeholder="What do you want to learn today?"
               />
-              <p className={`text-center text-[11px] mt-2.5 ${dark ? 'text-white/15' : 'text-slate-300'}`}>
+              <p style={{ textAlign: 'center', fontSize: 10.5, marginTop: 10, color: dark ? 'rgba(255,255,255,.12)' : 'rgba(0,0,0,.2)', letterSpacing: '0.02em' }}>
                 Enter to send · Shift+Enter for new line
               </p>
             </div>
@@ -262,32 +341,45 @@ export default function App() {
         {/* ── CHAT SCREEN ── */}
         {hasStarted && (
           <>
-            <div ref={scrollRef} className="flex-1 overflow-y-auto">
-              <div className="max-w-2xl mx-auto px-4 py-8 space-y-7 pb-44">
+            <div
+              ref={scrollRef}
+              onScroll={handleScroll}
+              style={{ flex: 1, overflowY: 'auto' }}
+            >
+              <div style={{ maxWidth: 680, margin: '0 auto', padding: '36px 20px 180px' }}>
                 {activeChat.map((msg, i) => (
                   <div
                     key={msg.id}
-                    className="msg"
-                    style={{ animationDelay: `${i * 0.04}s`, animationFillMode: 'both' }}
+                    className="msg msg-wrap"
+                    style={{ animationDelay: `${i * 0.04}s`, animationFillMode: 'both', marginBottom: 28 }}
                   >
                     {msg.role === 'user' ? (
-                      <div className="flex justify-end">
-                        <div className={`max-w-[78%] rounded-2xl rounded-tr-md px-4 py-3 ${
-                          dark ? 'bg-white/8 border border-white/6' : 'bg-white border border-black/6 shadow-sm'
-                        }`}>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                        <div style={{
+                          maxWidth: '76%', padding: '11px 16px',
+                          borderRadius: '14px 14px 3px 14px',
+                          background: dark ? 'rgba(255,255,255,.06)' : 'rgba(255,255,255,.85)',
+                          border: `1px solid ${dark ? 'rgba(255,255,255,.07)' : 'rgba(0,0,0,.07)'}`,
+                        }}>
                           <MarkdownRenderer content={msg.text} variant="user" dark={dark} />
                         </div>
                       </div>
                     ) : (
-                      <div className="flex items-start gap-3">
-                        <Avatar size={28} dark={dark} />
-                        <div className="flex-1 min-w-0 pt-0.5">
-                          <p className={`text-[10px] font-bold uppercase tracking-widest mb-2 ${
-                            dark ? 'text-blue-400/60' : 'text-blue-500/60'
-                          }`}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                        <Avatar size={26} dark={dark} />
+                        <div style={{ flex: 1, minWidth: 0, paddingTop: 2 }}>
+                          <p style={{
+                            fontSize: 9.5, fontFamily: "'JetBrains Mono', monospace",
+                            fontWeight: 500, letterSpacing: '0.14em', textTransform: 'uppercase',
+                            marginBottom: 8, color: dark ? 'rgba(201,169,110,.5)' : 'rgba(180,130,60,.6)',
+                          }}>
                             Aiva
                           </p>
                           <MarkdownRenderer content={msg.text} variant="aiva" dark={dark} />
+                          {/* Message actions */}
+                          <div className="msg-actions" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10 }}>
+                            <CopyButton text={msg.text} dark={dark} />
+                          </div>
                         </div>
                       </div>
                     )}
@@ -295,19 +387,21 @@ export default function App() {
                 ))}
 
                 {loading && (
-                  <div className="flex items-start gap-3 msg">
-                    <Avatar size={28} dark={dark} />
-                    <div className="pt-1">
-                      <p className={`text-[10px] font-bold uppercase tracking-widest mb-3 ${
-                        dark ? 'text-blue-400/60' : 'text-blue-500/60'
-                      }`}>
+                  <div className="msg" style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 28 }}>
+                    <Avatar size={26} dark={dark} />
+                    <div style={{ paddingTop: 4 }}>
+                      <p style={{
+                        fontSize: 9.5, fontFamily: "'JetBrains Mono', monospace",
+                        fontWeight: 500, letterSpacing: '0.14em', textTransform: 'uppercase',
+                        marginBottom: 10, color: dark ? 'rgba(201,169,110,.5)' : 'rgba(180,130,60,.6)',
+                      }}>
                         Aiva
                       </p>
-                      <div className="flex items-center gap-3">
-                        <span className={`dots flex ${dark ? 'text-white/25' : 'text-slate-300'}`}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span className="dots" style={{ display: 'flex', color: dark ? 'rgba(255,255,255,.22)' : 'rgba(0,0,0,.18)' }}>
                           <span /><span /><span />
                         </span>
-                        <span className={`text-[11px] font-medium ${dark ? 'text-white/22' : 'text-slate-300'}`}>
+                        <span style={{ fontSize: 11.5, fontWeight: 400, color: dark ? 'rgba(255,255,255,.2)' : 'rgba(0,0,0,.22)', letterSpacing: '0.01em' }}>
                           {LOADING_TEXTS[loadingIdx]}
                         </span>
                       </div>
@@ -317,28 +411,77 @@ export default function App() {
               </div>
             </div>
 
+            {/* Scroll to bottom button */}
+            {showScrollBtn && (
+              <button
+                onClick={scrollToBottom}
+                className="pop-in"
+                style={{
+                  position: 'absolute', bottom: 110, left: '50%', transform: 'translateX(-50%)',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '7px 14px', borderRadius: 20,
+                  background: dark ? 'rgba(30,28,26,.95)' : 'rgba(255,255,255,.95)',
+                  border: `1px solid ${dark ? 'rgba(255,255,255,.1)' : 'rgba(0,0,0,.1)'}`,
+                  color: dark ? 'rgba(232,228,220,.7)' : 'rgba(28,26,23,.6)',
+                  fontSize: 12, fontWeight: 500, cursor: 'pointer',
+                  boxShadow: dark ? '0 4px 16px rgba(0,0,0,.4)' : '0 4px 16px rgba(0,0,0,.1)',
+                  zIndex: 9,
+                }}
+              >
+                <ChevronDown size={13} />
+                Scroll to bottom
+              </button>
+            )}
+
             {/* Floating Input */}
-            <div className={`absolute bottom-0 left-0 right-0 px-4 pb-5 pt-12 bg-gradient-to-t ${
-              dark ? 'from-[#0f0f11] via-[#0f0f11]/90' : 'from-[#f0efe9] via-[#f0efe9]/90'
-            } to-transparent`}>
-              <div className="max-w-2xl mx-auto">
+            <div style={{
+              position: 'absolute', bottom: 0, left: 0, right: 0,
+              padding: '48px 20px 20px',
+              background: dark
+                ? 'linear-gradient(to top, #0e0e10 65%, transparent)'
+                : 'linear-gradient(to top, #f6f5f1 65%, transparent)',
+            }}>
+              <div style={{ maxWidth: 680, margin: '0 auto' }}>
+                {/* Regenerate button */}
+                {!loading && activeChat.length > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10 }}>
+                    <button
+                      onClick={handleRegenerate}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        padding: '6px 14px', borderRadius: 20, border: 'none',
+                        background: dark ? 'rgba(255,255,255,.05)' : 'rgba(0,0,0,.05)',
+                        color: dark ? 'rgba(232,228,220,.4)' : 'rgba(28,26,23,.4)',
+                        fontSize: 11.5, fontWeight: 500, cursor: 'pointer',
+                        transition: 'all .15s', letterSpacing: '0.01em',
+                      }}
+                      onMouseEnter={e => {
+                        (e.currentTarget as HTMLButtonElement).style.color = dark ? 'rgba(201,169,110,.9)' : 'rgba(180,130,60,.9)';
+                        (e.currentTarget as HTMLButtonElement).style.background = dark ? 'rgba(201,169,110,.08)' : 'rgba(201,169,110,.1)';
+                      }}
+                      onMouseLeave={e => {
+                        (e.currentTarget as HTMLButtonElement).style.color = dark ? 'rgba(232,228,220,.4)' : 'rgba(28,26,23,.4)';
+                        (e.currentTarget as HTMLButtonElement).style.background = dark ? 'rgba(255,255,255,.05)' : 'rgba(0,0,0,.05)';
+                      }}
+                    >
+                      <RefreshCw size={11} />
+                      Regenerate response
+                    </button>
+                  </div>
+                )}
+
                 <InputBox
-                  topic={topic}
-                  setTopic={setTopic}
-                  loading={loading}
-                  dark={dark}
-                  inputRef={inputRef}
-                  onGenerate={handleGenerate}
+                  topic={topic} setTopic={setTopic} loading={loading}
+                  dark={dark} inputRef={inputRef} onGenerate={handleGenerate}
                   placeholder="Ask a follow-up…"
                 />
-                <p className={`text-center text-[10px] mt-2 ${dark ? 'text-white/12' : 'text-slate-300'}`}>
+                <p style={{ textAlign: 'center', fontSize: 10, marginTop: 8, color: dark ? 'rgba(255,255,255,.1)' : 'rgba(0,0,0,.18)', letterSpacing: '0.02em' }}>
                   Enter to send · Shift+Enter for new line
                 </p>
               </div>
             </div>
           </>
         )}
-
       </main>
     </div>
   );

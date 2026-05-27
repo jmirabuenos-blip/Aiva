@@ -1,26 +1,33 @@
 import React from 'react';
 import type { ServerStatus } from '../types';
 
-// ─── PROPS ────────────────────────────────────────────────────────────────────
 interface StatusPillProps {
   serverStatus: ServerStatus;
   dark: boolean;
 }
 
-// ─── COMPONENT ────────────────────────────────────────────────────────────────
-export const StatusPill = ({ serverStatus, dark }: StatusPillProps) => (
-  <span className={`inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest px-2.5 py-1 rounded-full border ${
-    serverStatus === 'online'
-      ? (dark ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' : 'text-emerald-600 border-emerald-200 bg-emerald-50')
-      : serverStatus === 'checking'
-      ? (dark ? 'text-amber-400 border-amber-500/30 bg-amber-500/10' : 'text-amber-600 border-amber-200 bg-amber-50')
-      : (dark ? 'text-red-400 border-red-500/30 bg-red-500/10' : 'text-red-500 border-red-200 bg-red-50')
-  }`}>
-    <span className={`w-1.5 h-1.5 rounded-full ${
-      serverStatus === 'online'   ? 'bg-emerald-400' :
-      serverStatus === 'checking' ? 'bg-amber-400 animate-pulse' :
-                                    'bg-red-400'
-    }`} />
-    {serverStatus}
-  </span>
-);
+export const StatusPill = ({ serverStatus, dark }: StatusPillProps) => {
+  const configs: Record<ServerStatus, { dot: string; label: string; bg: string; border: string; text: string }> = {
+    online:   { dot: '#4ade80', label: 'Online',   bg: dark ? 'rgba(74,222,128,.08)'  : 'rgba(74,222,128,.1)',  border: dark ? 'rgba(74,222,128,.18)'  : 'rgba(74,222,128,.3)',  text: dark ? 'rgba(134,239,172,.8)' : '#166534' },
+    checking: { dot: '#fbbf24', label: 'Checking', bg: dark ? 'rgba(251,191,36,.08)'  : 'rgba(251,191,36,.1)',  border: dark ? 'rgba(251,191,36,.18)'  : 'rgba(251,191,36,.3)',  text: dark ? 'rgba(253,224,71,.8)'  : '#92400e' },
+    sleeping: { dot: '#94a3b8', label: 'Sleeping', bg: dark ? 'rgba(148,163,184,.08)' : 'rgba(148,163,184,.1)', border: dark ? 'rgba(148,163,184,.18)' : 'rgba(148,163,184,.3)', text: dark ? 'rgba(203,213,225,.7)' : '#475569' },
+  };
+
+  const c = configs[serverStatus];
+
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      fontSize: 10, fontWeight: 500, letterSpacing: '0.1em',
+      textTransform: 'uppercase', padding: '4px 9px', borderRadius: 20,
+      background: c.bg, border: `1px solid ${c.border}`, color: c.text,
+    }}>
+      <span style={{
+        width: 5, height: 5, borderRadius: '50%', background: c.dot, flexShrink: 0,
+        animation: serverStatus === 'checking' ? 'pulse 1.4s ease infinite' : 'none',
+      }} />
+      <style>{`@keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:1} }`}</style>
+      {c.label}
+    </span>
+  );
+};
